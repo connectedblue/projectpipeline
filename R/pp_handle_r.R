@@ -20,6 +20,7 @@
 #' \dontrun{run_project()}
 pp_handle_r <- function(file, meta=NULL) {
   
+  print(file)
   source(file)
   
 }
