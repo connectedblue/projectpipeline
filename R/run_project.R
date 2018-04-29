@@ -29,21 +29,15 @@ run_project <- function(config = 'default',
                         location = getwd(),
                         tarball = NULL) {
   
-  # location of config is hard-coded:  it must always be a subdirectory called
-  # config from the top level location of the project.
-  # Similarly the config file itself must have the suffix .config
-  config_dir <- file.path(location, 'config')
-  config_file <- file.path(config_dir, paste0(config, '.config'))
-  
-  # read the config file
-  params <- .get_project_config(config_file)
+  # read the project parameters from the appropriate config file
+  params <- .get_project_config(config, location)
   
   # load the packages needed for the project
   .load_packages(params$packages)
   
   # get the handlers for each extension type in the project
   # They should all be stored underneath the config directory
-  handlers <- .get_handlers(params$handlers, config_dir)
+  handlers <- .get_handlers(params$handlers, params$config_dir)
   
   # get project files to handle in order specified
   # by the pipeline parameter in the config
@@ -64,32 +58,67 @@ run_project <- function(config = 'default',
 
 # read the config file
 # Input:  
-#    config_file -- text string containing the location of the config file
-#                   File is in a DCF format
+#    config -- text string of the name of the config 
+#    location -- text string of project root directory
+#                   
+#    config file is always a specific location relative to
+#    the project root
+#
 # Output:
 #    params -- a list of parameters read from the config file
-.get_project_config <- function (config_file){
+.get_project_config <- function (config, location){
+  # location of config is hard-coded:  it must always be a subdirectory called
+  # config from the top level location of the project.
+  # Similarly the config file itself must have the suffix .config
+  config_dir <- file.path(location, 'config')
+  config_file <- file.path(config_dir, paste0(config, '.config'))
+  config <- .read_single_record_dcf(config_file)
   
+  #record the project root and config location also
+  config$project_root <- location
+  config$config_dir <- config_dir
+  config$config_file <- config_file
+  
+  # if this template inherits another, get the missing values from that file
+  if(!is.null(config$inherits)) {
+    inherits_file <- file.path(config_dir, paste0(config$inherits, '.config'))
+    inherits <- .read_single_record_dcf(inherits_file)
+    for (s in names(inherits)) {
+      if(is.null(config[[s]])) config[[s]] <- inherits[[s]]
+    }
+  }
+  
+  config
 }
 
+# utility function to read a single record DCF file, strip out comments, parse
+# any comma seperated values into a vector and execute any R code embedded between
+# two back ticks `` in the value field
+.read_single_record_dcf <- function(dcf_file) {
+  
+  # read raw file, stripping out comment lines
+  dcf <- readLines(dcf_file)
+  dcf <- sub("(.*)#.*$","\\1",dcf[!grepl("^#",dcf)])
+  tmp_dcf <- tempfile()
+  writeLines(dcf, tmp_dcf)
+  # Only interested in the first record
+  settings <- as.list((read.dcf(tmp_dcf)[1,]))
+  file.remove(tmp_dcf)
 
-.dcf_to_dataframe <- function(dcf) {
-  
-  settings <- as.data.frame(read.dcf(dcf))
-  
-  
-  settings <- setNames(as.list(as.character(settings)), colnames(settings))
-  
-  # Check each setting to see if it contains R code or a comment
+  # Check each setting to see if it contains a comma separated string or R code  and
+  # process accordingly
   for (s in names(settings)) {
-    if (grepl('^#', s)) {
-      settings[[s]] <- NULL
-      next
-    }
     value <- settings[[s]]
+    
     r_code <- gsub("^`(.*)`$", "\\1", value)
-    if (nchar(r_code) != nchar(value)) {
+    if (r_code != value) {
       settings[[s]] <- eval(parse(text=r_code))
+      value <- settings[[s]]
+    }
+    
+    if (grepl(",", value)) {
+      value <- gsub("\\s", "", value) 
+      settings[[s]] <- strsplit(value, ",")[[1]]
     }
   }
   settings
