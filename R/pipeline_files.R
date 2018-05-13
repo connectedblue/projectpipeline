@@ -3,6 +3,7 @@
 # Gets a list of files that need to be processed in the right order
 # Input:
 #    params - the parameters associated with the project
+#    handlers -- the handlers configured for the project
 #
 # Output:
 #   pipeline_files -- a list of files to process for the pipeline
@@ -26,7 +27,7 @@
 #                                     determined by the presence of a file file_name.cache
 #                                     in the same directory as file_name
 
-.files_in_pipeline <- function(params) {
+.files_in_pipeline <- function(params, handlers) {
   pipeline <- c()
   pipeline_files <- list()
   
@@ -55,14 +56,26 @@
     for (f in all_files) {
       file_data <- list()
       file_data$file_name <- f
-      file_data$ext <- sub(".*\\.(.*)$", "\\1", f)
-      file_data$meta_data <- NULL
-      file_data$cacheable <- FALSE  
+      
+      # match everything after the last . if one is present
+      file_data$ext <- sub("(.*)\\.([^\\.]*)$", "\\2", f)
+      file_data$ext <- ifelse(file_data$file_name==file_data$ext,NA,
+                              sub("(.*)\\.([^\\.]*)$", "\\2", f))
+      
+      # skip if f is the meta data file itself or if there is no handler
+      if (is.na(file_data$ext) | is.null(handlers[[file_data$ext]]) | file_data$ext=="meta") next()
+      
+      # otherwise check if a meta data file exists for f and
+      # read it in if it does
+      meta_file_data <- paste0(f, ".meta")
+      if(file.exists(meta_file_data))
+        file_data <- c(file_data, .read_single_record_dcf(meta_file_data))  
+      
+      # add to the pipeline
       pipeline_files[[idx]] <- file_data
       idx <- idx + 1
     }
   }
   pipeline_files
 }
-
 
